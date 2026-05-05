@@ -83,6 +83,41 @@ function formatResult(result: unknown): string {
   return JSON.stringify(result, null, 2);
 }
 
+interface PaginatedPage<T> {
+  data?: T[];
+  hasMore?: boolean;
+  nextCursor?: string;
+}
+
+/**
+ * Walks Sentry's cursor-based pagination, collecting items into a single array.
+ *
+ * Sentry list endpoints return either a bare array (older shapes / some endpoints)
+ * or a `{ data, hasMore, nextCursor }` wrapper. Without unwrapping the wrapper,
+ * callers that did `Array.isArray(raw)` would silently see zero results — which
+ * is exactly what made the setup wizard report "No projects found" for orgs that
+ * had any projects at all.
+ *
+ * `pageLimit` is a safety cap to avoid runaway loops if `hasMore` is stuck `true`.
+ */
+export async function collectPaginated<T>(
+  fetchPage: (cursor: string | undefined) => Promise<PaginatedPage<T> | T[] | unknown>,
+  options: { pageLimit?: number } = {},
+): Promise<T[]> {
+  const max = options.pageLimit ?? 50;
+  const all: T[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < max; i++) {
+    const page = await fetchPage(cursor);
+    if (Array.isArray(page)) return all.length === 0 ? (page as T[]) : [...all, ...(page as T[])];
+    const wrapper = (page ?? {}) as PaginatedPage<T>;
+    if (Array.isArray(wrapper.data)) all.push(...wrapper.data);
+    if (!wrapper.hasMore || !wrapper.nextCursor) return all;
+    cursor = wrapper.nextCursor;
+  }
+  return all;
+}
+
 /**
  * Why dynamic import? The `sentry` package bundles @sentry/node-core which
  * registers ESM loader hooks (import-in-the-middle) and diagnostics_channel
@@ -168,7 +203,9 @@ export function createSentryCLI(): SentryCLI {
 
     async projectList(orgSlug) {
       const { sdk } = await getSDK();
-      return await sdk.project.list({ orgProject: orgSlug });
+      return await collectPaginated((cursor) =>
+        sdk.project.list({ orgProject: orgSlug, limit: 100, cursor }),
+      );
     },
 
     async projectKeys(orgSlug, projectSlug) {

@@ -65,10 +65,7 @@ async function runSetup(ctx: ExtensionCommandContext, deps: SentryCommandDeps): 
     const login = await cli.authLogin();
     if (login.code !== 0) {
       ctx.ui.setStatus("sentry", "▲ Sentry (no DSN configured)");
-      ctx.ui.notify(
-        `Sentry login failed: ${login.stderr || "(no details)"}`,
-        "error",
-      );
+      ctx.ui.notify(`Sentry login failed: ${login.stderr || "(no details)"}`, "error");
       return;
     }
   }
@@ -200,10 +197,7 @@ async function runStatus(ctx: ExtensionCommandContext, deps: SentryCommandDeps):
     details: { lines },
   });
 
-  ctx.ui.setStatus(
-    "sentry",
-    loaded ? "▲ Sentry" : "▲ Sentry (no DSN configured)",
-  );
+  ctx.ui.setStatus("sentry", loaded ? "▲ Sentry" : "▲ Sentry (no DSN configured)");
 }
 
 async function runReset(ctx: ExtensionCommandContext, deps: SentryCommandDeps): Promise<void> {
@@ -289,7 +283,8 @@ function parseKeys(raw: unknown): ProjectKey[] {
   return raw
     .filter((k): k is Record<string, unknown> => !!k && typeof k === "object")
     .map((k) => {
-      const dsn = k.dsn && typeof k.dsn === "object" ? (k.dsn as Record<string, unknown>) : undefined;
+      const dsn =
+        k.dsn && typeof k.dsn === "object" ? (k.dsn as Record<string, unknown>) : undefined;
       return {
         name: typeof k.name === "string" ? k.name : undefined,
         dsn: dsn && typeof dsn.public === "string" ? { public: dsn.public } : undefined,

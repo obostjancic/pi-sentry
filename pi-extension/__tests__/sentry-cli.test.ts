@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { splitCommand, createSentryCLI } from "../sentry-cli.ts";
+import { splitCommand, createSentryCLI, collectPaginated } from "../sentry-cli.ts";
 
 describe("splitCommand", () => {
   it("splits basic args", () => {
@@ -73,5 +73,66 @@ describe("createSentryCLI", () => {
     expect(typeof cli.orgList).toBe("function");
     expect(typeof cli.projectList).toBe("function");
     expect(typeof cli.projectKeys).toBe("function");
+  });
+});
+
+describe("collectPaginated", () => {
+  it("returns a bare array as-is when the fetcher does not paginate", async () => {
+    const result = await collectPaginated(async () => [{ slug: "a" }, { slug: "b" }]);
+    expect(result).toEqual([{ slug: "a" }, { slug: "b" }]);
+  });
+
+  it("unwraps a single paginated page with hasMore=false", async () => {
+    const result = await collectPaginated(async () => ({
+      data: [{ slug: "a" }],
+      hasMore: false,
+    }));
+    expect(result).toEqual([{ slug: "a" }]);
+  });
+
+  it("walks pages until hasMore is false, threading nextCursor", async () => {
+    const pages = [
+      { data: [{ slug: "a" }], hasMore: true, nextCursor: "c1" },
+      { data: [{ slug: "b" }], hasMore: true, nextCursor: "c2" },
+      { data: [{ slug: "c" }], hasMore: false },
+    ];
+    const calls: (string | undefined)[] = [];
+    let i = 0;
+    const result = await collectPaginated<{ slug: string }>(async (cursor) => {
+      calls.push(cursor);
+      return pages[i++];
+    });
+    expect(result).toEqual([{ slug: "a" }, { slug: "b" }, { slug: "c" }]);
+    expect(calls).toEqual([undefined, "c1", "c2"]);
+  });
+
+  it("stops when nextCursor is missing even if hasMore is true", async () => {
+    const result = await collectPaginated(async () => ({
+      data: [{ slug: "a" }],
+      hasMore: true,
+    }));
+    expect(result).toEqual([{ slug: "a" }]);
+  });
+
+  it("returns [] when the wrapper has no data and no array", async () => {
+    const result = await collectPaginated(async () => ({ hasMore: false }));
+    expect(result).toEqual([]);
+  });
+
+  it("respects the pageLimit safety cap to avoid runaway loops", async () => {
+    let count = 0;
+    const result = await collectPaginated<{ slug: string }>(
+      async () => {
+        count++;
+        return {
+          data: [{ slug: `p${count}` }],
+          hasMore: true,
+          nextCursor: `c${count}`,
+        };
+      },
+      { pageLimit: 3 },
+    );
+    expect(result).toHaveLength(3);
+    expect(count).toBe(3);
   });
 });

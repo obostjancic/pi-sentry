@@ -17,6 +17,7 @@ function createMockPi() {
     },
     registerMessageRenderer() {},
     registerTool() {},
+    registerCommand() {},
     sendMessage() {},
     sendUserMessage() {},
     on(event: string) {

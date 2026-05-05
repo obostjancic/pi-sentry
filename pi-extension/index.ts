@@ -7,6 +7,7 @@ import { conversationIdIntegration, getClient } from "@sentry/core";
 import { loadPluginConfig, type ResolvedPluginConfig } from "./config.ts";
 import { createLogger, getProjectName, getAgentName } from "./helpers.ts";
 import { createSentryTool } from "./tool.ts";
+import { handleSentryCommand } from "./setup.ts";
 import { SessionTracer } from "./tracing.ts";
 
 let sentryInitialized = false;
@@ -182,6 +183,33 @@ export default async function piSentryMonitor(pi: ExtensionAPI) {
   // Register sentry CLI tool — always available regardless of DSN config
   const cli = createSentryCLI();
   pi.registerTool(createSentryTool(cli));
+
+  // Register status renderer for /sentry status output
+  pi.registerMessageRenderer("sentry-status", (message, _opts, theme) => {
+    const d = message.details as { lines?: string[] } | undefined;
+    const lines = d?.lines ?? [String(message.content ?? "")];
+    const header =
+      theme.inverse(theme.fg("accent", " ▲ SENTRY ")) + " " + theme.fg("muted", "status");
+    const body = lines.map((l) => "  " + l).join("\n");
+    const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+    box.addChild(new Text(`${header}\n${body}`, 0, 0));
+    return box;
+  });
+
+  // Register /sentry command — works with or without a DSN
+  const sentryCommandDeps = { cli, pi };
+  pi.registerCommand("sentry", {
+    description: "Configure Sentry monitoring (setup wizard, status, reset)",
+    getArgumentCompletions: (prefix) => {
+      const subs = [
+        { value: "status", label: "status", description: "Show current auth and config" },
+        { value: "reset", label: "reset", description: "Delete .pi/sentry.json and reload" },
+      ];
+      const lower = prefix.toLowerCase();
+      return subs.filter((s) => s.value.startsWith(lower));
+    },
+    handler: (args, ctx) => handleSentryCommand(args, ctx, sentryCommandDeps),
+  });
 
   // Load config — if no DSN, register tool-only mode and return
   const loaded = await loadPluginConfig(cwd, logger);

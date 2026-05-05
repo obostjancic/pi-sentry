@@ -9,6 +9,9 @@ export interface SentryCLI {
   authStatus(): Promise<CLIResult>;
   authLogin(): Promise<CLIResult>;
   issueList(options?: { limit?: number; query?: string }): Promise<unknown>;
+  orgList(): Promise<unknown>;
+  projectList(orgSlug: string): Promise<unknown>;
+  projectKeys(orgSlug: string, projectSlug: string): Promise<unknown>;
 }
 
 /**
@@ -156,6 +159,21 @@ export function createSentryCLI(): SentryCLI {
     async issueList(options) {
       const { sdk } = await getSDK();
       return await sdk.issue.list(options);
+    },
+
+    async orgList() {
+      const { sdk } = await getSDK();
+      return await sdk.org.list();
+    },
+
+    async projectList(orgSlug) {
+      const { sdk } = await getSDK();
+      return await sdk.project.list({ orgProject: orgSlug });
+    },
+
+    async projectKeys(orgSlug, projectSlug) {
+      const { sdk } = await getSDK();
+      return await sdk.api({ endpoint: `/api/0/projects/${orgSlug}/${projectSlug}/keys/` });
     },
   };
 }

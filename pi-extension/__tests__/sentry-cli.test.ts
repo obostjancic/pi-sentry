@@ -70,5 +70,8 @@ describe("createSentryCLI", () => {
     expect(typeof cli.authStatus).toBe("function");
     expect(typeof cli.authLogin).toBe("function");
     expect(typeof cli.issueList).toBe("function");
+    expect(typeof cli.orgList).toBe("function");
+    expect(typeof cli.projectList).toBe("function");
+    expect(typeof cli.projectKeys).toBe("function");
   });
 });

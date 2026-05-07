@@ -111,23 +111,58 @@ export async function createEnvelopeServer(): Promise<EnvelopeServer> {
       const spans: Record<string, unknown>[] = [];
       for (const env of envelopes) {
         for (const item of env.items) {
+          const payload = item.payload as any;
+
+          // Span streaming format (v2): type === "span"
+          if (item.header.type === "span" && typeof payload === "object") {
+            if (payload.items && Array.isArray(payload.items)) {
+              // Span v2 format with items array - flatten attribute values
+              for (const span of payload.items) {
+                const flatSpan: Record<string, unknown> = { ...span };
+                // Flatten attributes: {key: {value: "...", type: "string"}} -> {key: "..."}
+                if (span.attributes && typeof span.attributes === "object") {
+                  const flatAttrs: Record<string, unknown> = {};
+                  for (const [k, v] of Object.entries(span.attributes)) {
+                    if (v && typeof v === "object" && "value" in v) {
+                      flatAttrs[k] = (v as any).value;
+                    } else {
+                      flatAttrs[k] = v;
+                    }
+                  }
+                  flatSpan.data = flatAttrs;
+                  // Copy key attributes to top-level for convenience (matches legacy format)
+                  if (flatAttrs["sentry.op"]) {
+                    (flatSpan as any)["sentry.op"] = flatAttrs["sentry.op"];
+                  } else if (flatAttrs["gen_ai.operation.name"]) {
+                    (flatSpan as any)["sentry.op"] = "gen_ai." + flatAttrs["gen_ai.operation.name"];
+                  }
+                  if (flatAttrs["gen_ai.operation.name"]) {
+                    (flatSpan as any)["op"] = "gen_ai." + flatAttrs["gen_ai.operation.name"];
+                  }
+                }
+                spans.push(flatSpan);
+              }
+            }
+          }
+
+          // Legacy transaction format: type === "transaction"
           if (
             typeof item.payload === "object" &&
             item.payload !== null &&
             (item.header.type === "transaction" || (item.payload as any).type === "transaction")
           ) {
-            const tx = item.payload as any;
+            const txPayload = item.payload as any;
             // The transaction itself is a span
-            if (tx.contexts?.trace) {
+            if (txPayload.contexts?.trace) {
               spans.push({
-                ...tx.contexts.trace,
-                data: { ...tx.contexts.trace.data },
-                transaction: tx.transaction,
+                ...txPayload.contexts.trace,
+                data: { ...txPayload.contexts.trace.data },
+                transaction: txPayload.transaction,
               });
             }
             // Child spans
-            if (Array.isArray(tx.spans)) {
-              spans.push(...tx.spans);
+            if (Array.isArray(txPayload.spans)) {
+              spans.push(...txPayload.spans);
             }
           }
         }
@@ -139,6 +174,8 @@ export async function createEnvelopeServer(): Promise<EnvelopeServer> {
       const txns: Record<string, unknown>[] = [];
       for (const env of envelopes) {
         for (const item of env.items) {
+          // Note: In span streaming mode, transactions are not emitted
+          // Spans come through with type: "span" instead
           if (
             typeof item.payload === "object" &&
             item.payload !== null &&

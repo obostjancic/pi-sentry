@@ -6,38 +6,35 @@ describe("basic session trace", () => {
     await withTestSession({}, async (ctx) => {
       await ctx.session.prompt("Say hello");
 
-      // Wait for Sentry to flush envelopes (transaction + session)
+      // Wait for Sentry to flush envelopes (span streaming sends spans directly)
       await ctx.server.waitForEnvelopes(1, 15_000);
-
-      const txns = ctx.server.getTransactions();
-      expect(txns.length).toBeGreaterThan(0);
 
       const spans = ctx.server.getSpans();
       expect(spans.length).toBeGreaterThan(0);
 
-      // Find the invoke_agent span (root transaction span)
+      // Find the invoke_agent segment span (root span in span streaming)
       const agentSpan = spans.find(
         (s: any) =>
-          s.op === "gen_ai.invoke_agent" || s.data?.["gen_ai.operation.name"] === "invoke_agent",
+          s["sentry.op"] === "gen_ai.invoke_agent" ||
+          s.data?.["gen_ai.operation.name"] === "invoke_agent" ||
+          s.name === "invoke_agent pi",
       );
       expect(agentSpan).toBeDefined();
 
-      // Check session ID attribute exists on the transaction
-      const tx = txns[0] as any;
-      // Check trace data on the root span (transaction context)
-      const traceData = tx.contexts?.trace?.data ?? {};
+      // Check session ID attribute exists on the span
+      const data = agentSpan.data ?? {};
 
       // Agent name should be present
-      expect(traceData["gen_ai.agent.name"]).toBe("pi");
+      expect(data["gen_ai.agent.name"]).toBe("pi");
 
       // Model should be recorded
-      expect(traceData["gen_ai.request.model"]).toBeTruthy();
+      expect(data["gen_ai.request.model"]).toBeTruthy();
 
       // Project name should be present
-      expect(traceData["pi.project.name"]).toBeTruthy();
+      expect(data["pi.project.name"]).toBeTruthy();
 
       // Turn index should be recorded
-      expect(traceData["pi.turn.index"]).toBeDefined();
+      expect(data["pi.turn.index"]).toBeDefined();
     });
   });
 
@@ -50,13 +47,14 @@ describe("basic session trace", () => {
 
       // Find request span
       const requestSpan = spans.find(
-        (s: any) => s.op === "gen_ai.request" || s.data?.["gen_ai.operation.name"] === "request",
+        (s: any) =>
+          s["sentry.op"] === "gen_ai.request" || s.data?.["gen_ai.operation.name"] === "request",
       );
       expect(requestSpan).toBeDefined();
 
       // Check model attribute
-      const data = (requestSpan as any)?.data ?? {};
-      expect(data["gen_ai.request.model"]).toBeTruthy();
+      const spanData = (requestSpan as any)?.data ?? {};
+      expect(spanData["gen_ai.request.model"]).toBeTruthy();
     });
   });
 });

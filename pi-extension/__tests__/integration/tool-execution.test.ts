@@ -45,7 +45,8 @@ describe("tool execution trace", () => {
         // Find execute_tool span
         const toolSpan = spans.find(
           (s: any) =>
-            s.op === "gen_ai.execute_tool" || s.data?.["gen_ai.operation.name"] === "execute_tool",
+            s["sentry.op"] === "gen_ai.execute_tool" ||
+            s.data?.["gen_ai.operation.name"] === "execute_tool",
         );
         expect(toolSpan).toBeDefined();
 

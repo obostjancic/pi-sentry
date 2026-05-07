@@ -58,12 +58,11 @@ describe("tool_call handler crash", () => {
         // Verify the tag identifies it as a tool_call error
         expect((toolCallError as any)?.tags?.["pi.extension.event"]).toBe("tool_call");
 
-        // Verify the agent loop completed — we got a transaction with tool execution
-        const txns = ctx.server.getTransactions();
-        expect(txns.length).toBeGreaterThan(0);
-
+        // Verify the agent loop completed — we got spans with tool execution
         const spans = ctx.server.getSpans();
-        const toolSpan = spans.find((s: any) => s.op === "gen_ai.execute_tool");
+        expect(spans.length).toBeGreaterThan(0);
+
+        const toolSpan = spans.find((s: any) => s["sentry.op"] === "gen_ai.execute_tool");
         expect(toolSpan).toBeDefined();
       },
     );

@@ -13,8 +13,8 @@ describe("extension_error event", () => {
       async (ctx) => {
         await ctx.session.prompt("Say hello");
 
-        // Wait for envelopes — we expect both a transaction AND an error event
-        // The transaction comes from the normal trace, the error from the broken handler
+        // Wait for envelopes — we expect both a span AND an error event
+        // The span comes from the normal trace, the error from the broken handler
         await ctx.server.waitForEnvelopes(2, 15_000);
 
         // Verify the error event was captured
@@ -38,8 +38,8 @@ describe("extension_error event", () => {
         expect(tags["pi.extension.path"]).toContain("broken-handler-extension");
 
         // Verify traces still work despite the error
-        const txns = ctx.server.getTransactions();
-        expect(txns.length).toBeGreaterThan(0);
+        const spans = ctx.server.getSpans();
+        expect(spans.length).toBeGreaterThan(0);
       },
     );
   });

@@ -35,8 +35,8 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
-    "@sentry/core": "^10.47.0",
-    "@sentry/node-core": "^10.44.0",
+    "@sentry/core": "^10.51.0",
+    "@sentry/node-core": "^10.51.0",
     "sentry": "^0.23.0",
     "strip-json-comments": "^5.0.1"
   },

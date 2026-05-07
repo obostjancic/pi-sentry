@@ -52,6 +52,8 @@ function initSentry(
     release: config.release,
     debug: config.debug,
     sendDefaultPii: false,
+    // Enable span streaming for real-time span emission
+    traceLifecycle: "stream",
     integrations: [
       Sentry.eventFiltersIntegration(),
       Sentry.linkedErrorsIntegration(),
@@ -64,6 +66,8 @@ function initSentry(
       }),
       conversationIdIntegration(),
     ],
+    // Span streaming mode: beforeSendTransaction has no effect
+    // Use beforeSendSpan with withStreamedSpan() if span modification is needed
   });
 
   sentryInitialized = true;
@@ -305,7 +309,7 @@ export default async function piSentryMonitor(pi: ExtensionAPI) {
 
       setTimeout(() => {
         if (!statusFlashTimer) {
-          ctx.ui.setStatus("sentry", "▲ Sentry");
+          uiContext?.setStatus("sentry", "▲ Sentry");
         }
       }, 5000);
 
@@ -328,6 +332,7 @@ export default async function piSentryMonitor(pi: ExtensionAPI) {
   });
 
   pi.on("session_switch", (_event, ctx) => {
+    uiContext = ctx.ui;
     tracer.setSession(ctx.sessionManager.getSessionId(), ctx.sessionManager.getSessionFile());
     tracer.resetSession();
   });

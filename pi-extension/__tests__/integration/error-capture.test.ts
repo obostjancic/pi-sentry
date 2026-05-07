@@ -18,11 +18,11 @@ describe("error capture", () => {
         // Sentry extension should still be capturing traces
         await ctx.server.waitForEnvelopes(1, 15_000);
 
-        const txns = ctx.server.getTransactions();
-        expect(txns.length).toBeGreaterThan(0);
+        const spans = ctx.server.getSpans();
+        expect(spans.length).toBeGreaterThan(0);
 
-        const tx = txns[0] as any;
-        expect(tx.transaction).toContain("invoke_agent");
+        const agentSpan = spans.find((s: any) => s["sentry.op"] === "gen_ai.invoke_agent");
+        expect(agentSpan).toBeDefined();
       },
     );
   });
@@ -42,7 +42,7 @@ describe("error capture", () => {
 
         // We verify at minimum that the session trace was not disrupted
         const spans = ctx.server.getSpans();
-        const agentSpan = spans.find((s: any) => s.op === "gen_ai.invoke_agent");
+        const agentSpan = spans.find((s: any) => s["sentry.op"] === "gen_ai.invoke_agent");
         expect(agentSpan).toBeDefined();
 
         // If errors were captured, verify they contain our extension error

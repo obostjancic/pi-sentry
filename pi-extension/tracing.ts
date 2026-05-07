@@ -30,7 +30,8 @@ export class SessionTracer {
   private turnHadToolCalls = false;
   private lastContextUsage: ContextUsageSnapshot | undefined;
 
-  pendingSpanCount = 0;
+  /** Total spans ended since last onToolEnd/onMessageEnd (reset by spanSent callback) */
+  spanCount = 0;
 
   constructor(
     private readonly config: ResolvedPluginConfig,
@@ -221,7 +222,7 @@ export class SessionTracer {
     setSpanStatus(span, event.isError);
     span.end();
     this.toolSpans.delete(event.toolCallId);
-    this.pendingSpanCount++;
+    this.spanCount++;
 
     if (this.config.enableMetrics) {
       Sentry.metrics.count("gen_ai.client.tool.execution", 1, {
@@ -391,7 +392,7 @@ export class SessionTracer {
     }
     setSpanStatus(usageSpan, false);
     usageSpan.end();
-    this.pendingSpanCount++;
+    this.spanCount++;
 
     if (this.config.enableMetrics) {
       const metricAttrs = {
@@ -445,8 +446,15 @@ export class SessionTracer {
     }
 
     this.cleanupSession();
-    this.pendingSpanCount++;
+    this.spanCount++;
     this.turnHadToolCalls = false;
     return true;
+  }
+
+  /** Returns count of spans sent since last reset() and resets counter. */
+  resetSpanCount(): number {
+    const count = this.spanCount;
+    this.spanCount = 0;
+    return count;
   }
 }

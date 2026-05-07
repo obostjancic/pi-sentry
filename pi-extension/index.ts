@@ -255,6 +255,8 @@ export default async function piSentryMonitor(pi: ExtensionAPI) {
   // Status bar flash state
   let uiContext: ExtensionUIContext | undefined;
   let statusFlashTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingFlashCount = 0;
+  let flashDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
   function flashStatus(count: number): void {
     if (!uiContext || count === 0) return;
@@ -264,6 +266,19 @@ export default async function piSentryMonitor(pi: ExtensionAPI) {
       uiContext?.setStatus("sentry", "▲ Sentry");
       statusFlashTimer = undefined;
     }, 5000);
+  }
+
+  /** Schedule a debounced flash for when spans are streamed. */
+  function scheduleSpanFlash(): void {
+    pendingFlashCount++;
+    if (flashDebounceTimer) clearTimeout(flashDebounceTimer);
+    flashDebounceTimer = setTimeout(() => {
+      if (pendingFlashCount > 0) {
+        flashStatus(pendingFlashCount);
+      }
+      pendingFlashCount = 0;
+      flashDebounceTimer = undefined;
+    }, 100);
   }
 
   async function runBackgroundQuery() {
@@ -380,6 +395,7 @@ export default async function piSentryMonitor(pi: ExtensionAPI) {
   pi.on("tool_execution_end", (event) => {
     try {
       tracer.onToolEnd(event);
+      scheduleSpanFlash();
     } catch (error) {
       Sentry.captureException(error);
       logger.warn("Failed to finish tool span", {
@@ -409,6 +425,7 @@ export default async function piSentryMonitor(pi: ExtensionAPI) {
     try {
       tracer.setContextUsage(ctx.getContextUsage());
       tracer.onMessageEnd(event);
+      scheduleSpanFlash();
     } catch (error) {
       Sentry.captureException(error);
       logger.warn("Failed to create message usage span", {
@@ -427,11 +444,9 @@ export default async function piSentryMonitor(pi: ExtensionAPI) {
       const shouldFlush = tracer.onTurnEnd();
       if (!shouldFlush) return;
 
-      const flushedCount = tracer.pendingSpanCount;
-      tracer.pendingSpanCount = 0;
-      if (client) {
-        await client.flush(5000);
-      }
+      // Spans are already streamed in real-time with traceLifecycle: 'stream'.
+      // Flash any remaining count from cleanup session span.
+      const flushedCount = tracer.resetSpanCount();
       flashStatus(flushedCount);
 
       if (config.enableCLIInsights && sentryAuthenticated) {

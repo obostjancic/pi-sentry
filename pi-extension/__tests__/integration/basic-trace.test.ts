@@ -22,7 +22,7 @@ describe("basic session trace", () => {
       expect(agentSpan).toBeDefined();
 
       // Check session ID attribute exists on the span
-      const data = agentSpan.data ?? {};
+      const data = agentSpan!.data as any;
 
       // Agent name should be present
       expect(data["gen_ai.agent.name"]).toBe("pi");

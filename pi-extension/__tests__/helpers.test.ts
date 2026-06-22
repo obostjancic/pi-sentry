@@ -2,12 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   attachTokenUsage,
   detectSubagentName,
-  isAuthError,
   isAssistantMessage,
   getProjectName,
   getAgentName,
-  formatSentryDuration,
   setSpanStatus,
+  buildOutputMessages,
+  userTextMessages,
+  mapFinishReason,
 } from "../helpers.ts";
 import type { ResolvedPluginConfig } from "../config.ts";
 
@@ -41,8 +42,6 @@ function makeConfig(overrides: Partial<ResolvedPluginConfig> = {}): ResolvedPlug
     maxAttributeLength: 12000,
     includeMessageUsageSpans: true,
     includeSessionEvents: true,
-    enableMetrics: false,
-    enableCLIInsights: false,
     tags: {},
     ...overrides,
   };
@@ -63,8 +62,8 @@ describe("attachTokenUsage", () => {
     expect(span.attrs["gen_ai.usage.input_tokens"]).toBe(325);
     expect(span.attrs["gen_ai.usage.output_tokens"]).toBe(50);
     expect(span.attrs["gen_ai.usage.total_tokens"]).toBe(375);
-    expect(span.attrs["gen_ai.usage.input_tokens.cached"]).toBe(200);
-    expect(span.attrs["gen_ai.usage.input_tokens.cache_write"]).toBe(25);
+    expect(span.attrs["gen_ai.usage.cache_read.input_tokens"]).toBe(200);
+    expect(span.attrs["gen_ai.usage.cache_creation.input_tokens"]).toBe(25);
   });
 
   it("does not set input_tokens when total is 0", () => {
@@ -111,22 +110,6 @@ describe("detectSubagentName", () => {
   it("handles agent name without .md extension", () => {
     process.argv = ["node", "pi", "--append-system-prompt", "/tmp/pi-subagent-xyz/scout"];
     expect(detectSubagentName()).toBe("scout");
-  });
-});
-
-describe("isAuthError", () => {
-  it("detects common auth error patterns", () => {
-    expect(isAuthError("Error: not logged in")).toBe(true);
-    expect(isAuthError("401 Unauthorized")).toBe(true);
-    expect(isAuthError("Please run 'sentry auth login'")).toBe(true);
-    expect(isAuthError("Not authenticated")).toBe(true);
-    expect(isAuthError("login required")).toBe(true);
-  });
-
-  it("returns false for normal output", () => {
-    expect(isAuthError("Found 5 issues")).toBe(false);
-    expect(isAuthError("Trace abc123 loaded")).toBe(false);
-    expect(isAuthError("")).toBe(false);
   });
 });
 
@@ -206,12 +189,56 @@ describe("getAgentName", () => {
   });
 });
 
-describe("formatSentryDuration", () => {
-  it("formats milliseconds to seconds", () => {
-    expect(formatSentryDuration(1500)).toBe("1.5s");
-    expect(formatSentryDuration(500)).toBe("0.5s");
-    expect(formatSentryDuration(0)).toBe("0.0s");
-    expect(formatSentryDuration(10000)).toBe("10.0s");
+describe("userTextMessages", () => {
+  it("wraps a prompt in the canonical {role, parts} shape", () => {
+    expect(userTextMessages("hello")).toEqual([
+      { role: "user", parts: [{ type: "text", content: "hello" }] },
+    ]);
+  });
+});
+
+describe("mapFinishReason", () => {
+  it("maps toolUse to tool_calls", () => {
+    expect(mapFinishReason("toolUse")).toBe("tool_calls");
+  });
+
+  it("passes through other stop reasons", () => {
+    expect(mapFinishReason("stop")).toBe("stop");
+    expect(mapFinishReason("length")).toBe("length");
+  });
+});
+
+describe("buildOutputMessages", () => {
+  it("maps text, thinking, and tool calls to canonical parts", () => {
+    const result = buildOutputMessages(
+      [
+        { type: "thinking", thinking: "let me think" },
+        { type: "text", text: "the answer" },
+        { type: "toolCall", id: "call_1", name: "search", arguments: { q: "x" } },
+      ],
+      "toolUse",
+    );
+    expect(result).toEqual([
+      {
+        role: "assistant",
+        parts: [
+          { type: "reasoning", content: "let me think" },
+          { type: "text", content: "the answer" },
+          { type: "tool_call", id: "call_1", name: "search", arguments: { q: "x" } },
+        ],
+        finish_reason: "tool_calls",
+      },
+    ]);
+  });
+
+  it("omits the finish_reason when no stop reason is given", () => {
+    const result = buildOutputMessages([{ type: "text", text: "hi" }]);
+    expect(result[0].finish_reason).toBeUndefined();
+  });
+
+  it("returns an empty array when there is no recordable content", () => {
+    expect(buildOutputMessages([{ type: "text", text: "" }])).toEqual([]);
+    expect(buildOutputMessages([])).toEqual([]);
   });
 });
 

@@ -1,24 +1,39 @@
 # Sentry Extension for pi
 
-Full [Sentry](https://sentry.io) observability for [pi](https://github.com/badlogic/pi-mono) coding agent sessions — distributed tracing, error capture, and a built-in Sentry CLI tool.
+[Sentry](https://sentry.io) observability for [pi](https://github.com/badlogic/pi-mono) coding agent sessions — distributed tracing and error capture.
 
 Monitoring is safe by default: traces are on, but tool inputs and outputs are not captured unless you opt in.
 
 ## What It Does
 
-**Monitoring** — Every agent session becomes a Sentry trace. Tool calls, LLM requests, token usage, and errors are captured as spans with full [AI Agent Monitoring](https://docs.sentry.io/product/ai-monitoring/) attributes.
-
-**Sentry CLI tool** — Agents can query Sentry directly: list issues, view traces, inspect spans, read logs, get AI-powered explanations — all without leaving the conversation.
+Every agent session becomes a Sentry trace. Tool calls, LLM requests, token usage, and errors are captured as spans with full [AI Agent Monitoring](https://docs.sentry.io/product/ai-monitoring/) attributes.
 
 ### Trace Structure
 
 ```
 gen_ai.invoke_agent (per user interaction)
 ├── gen_ai.execute_tool (per tool call — bash, read, edit, etc.)
-└── gen_ai.request (per LLM request — model, tokens, latency)
+└── gen_ai.chat (per LLM request — model, tokens, latency)
 ```
 
 Each user message starts a new trace. Tool inputs/outputs and LLM responses are captured only when you opt in with `recordInputs` and `recordOutputs`.
+
+### Attributes
+
+Spans follow the canonical [Sentry `gen_ai.*` conventions](https://getsentry.github.io/sentry-conventions/attributes/gen_ai/) — no deprecated keys are emitted. Notable mappings:
+
+| Data | Attribute |
+|---|---|
+| Provider | `gen_ai.provider.name` |
+| Input messages (opt-in) | `gen_ai.input.messages` (`{role, parts}` shape) |
+| Output messages (opt-in) | `gen_ai.output.messages` (text + reasoning + tool calls) |
+| Tool arguments (opt-in) | `gen_ai.tool.call.arguments` |
+| Tool result (opt-in) | `gen_ai.tool.call.result` |
+| Cached input tokens | `gen_ai.usage.cache_read.input_tokens` |
+| Cache-write tokens | `gen_ai.usage.cache_creation.input_tokens` |
+| Finish reason | `gen_ai.response.finish_reasons` |
+
+pi-specific metadata (session id, project name, turn index, tool call id) is namespaced under `pi.*`.
 
 ## Install
 
@@ -44,7 +59,7 @@ Create `.pi/sentry.json` (or `.jsonc`):
 }
 ```
 
-That's it. Traces flow immediately. The Sentry CLI tool works even without a DSN — monitoring is optional. If you want request text or tool payloads in Sentry, opt in explicitly:
+That's it. Traces flow immediately. Without a DSN the extension stays inactive. If you want request text or tool payloads in Sentry, opt in explicitly:
 
 ```json
 {
@@ -70,7 +85,6 @@ By default, `recordInputs` and `recordOutputs` are `false`, so the extension cap
 | `PI_SENTRY_TRACES_SAMPLE_RATE` | Sample rate (0–1) |
 | `PI_SENTRY_RECORD_INPUTS` | Capture tool inputs (true/false, default `false`) |
 | `PI_SENTRY_RECORD_OUTPUTS` | Capture tool outputs (true/false, default `false`) |
-| `PI_SENTRY_ENABLE_METRICS` | Emit token usage metrics (true/false) |
 | `PI_SENTRY_TAGS` | Custom tags (`key:value,key:value`) |
 | `SENTRY_ENVIRONMENT` | Environment name |
 | `SENTRY_RELEASE` | Release version |
@@ -91,8 +105,6 @@ By default, `recordInputs` and `recordOutputs` are `false`, so the extension cap
   "maxAttributeLength": 12000,
   "includeMessageUsageSpans": true,
   "includeSessionEvents": true,
-  "enableMetrics": false,
-  "enableCLIInsights": false,
   "tags": {
     "team": "platform"
   }
@@ -100,22 +112,6 @@ By default, `recordInputs` and `recordOutputs` are `false`, so the extension cap
 ```
 
 To capture content when you need it, enable `recordInputs` and `recordOutputs` in config or via the matching environment variables.
-
-## Sentry CLI Tool
-
-Once installed, agents have a `sentry` tool for querying Sentry data. Auth is handled automatically — if the agent isn't authenticated, the tool opens a browser login flow and retries.
-
-```
-sentry issue list --limit 5
-sentry issue view PROJ-123
-sentry issue explain PROJ-123
-sentry trace list --since 1h
-sentry trace view <trace-id>
-sentry span list <trace-id>
-sentry log list
-```
-
-A bundled skill (`sentry-cli`) teaches agents the full command set. It's auto-discovered on install.
 
 ## Event Mapping
 
@@ -126,8 +122,8 @@ A bundled skill (`sentry-cli`) teaches agents the full command set. It's auto-di
 | `model_select` | Update model/provider on active spans |
 | `tool_execution_start` | Start `gen_ai.execute_tool` child span |
 | `tool_execution_end` | End tool span with result/error status |
-| `message_start` (assistant) | Start `gen_ai.request` span (measures LLM latency) |
-| `message_end` (assistant) | End request span, attach token usage and content |
+| `message_start` (assistant) | Start `gen_ai.chat` span (measures LLM latency) |
+| `message_end` (assistant) | End chat span, attach token usage and content |
 | `turn_end` | Flush completed trace to Sentry |
 | `session_shutdown` | Close all open spans, flush, shut down client |
 | `extension_error` | Capture exception from any extension handler crash |

@@ -53,10 +53,9 @@ describe("tool execution trace", () => {
         // Check tool name
         const data = (toolSpan as any)?.data ?? {};
         expect(data["gen_ai.tool.name"]).toBe("test_tool");
-        expect(data["gen_ai.tool.type"]).toBe("function");
 
-        // Check tool input was recorded
-        expect(data["gen_ai.tool.input"]).toBeTruthy();
+        // Check tool input was recorded under the canonical attribute
+        expect(data["gen_ai.tool.call.arguments"]).toBeTruthy();
       },
     );
   });

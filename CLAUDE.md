@@ -1,22 +1,17 @@
 # Sentry Extension
 
-Sentry observability extension for [pi](https://github.com/badlogic/pi-mono). Instruments agent sessions as distributed traces and provides a `sentry` tool for querying Sentry data.
+Sentry observability extension for [pi](https://github.com/badlogic/pi-mono). Instruments agent sessions as distributed traces and captures errors. Scope is intentionally minimal: error + tracing only — no metrics, no CLI tool, no setup wizard.
 
 ## Structure
 
 ```
-pi-extension/          ← TypeScript source (extension + sentry CLI wrapper)
+pi-extension/          ← TypeScript source
   index.ts             ← Main extension: config loading, event wiring, Sentry init
   config.ts            ← Config loading, interfaces, defaults, env overrides
   helpers.ts           ← Pure utility functions (logger, naming, token math, type guards)
-  tool.ts              ← Sentry CLI tool definition (render + execute with auth retry)
   tracing.ts           ← SessionTracer class: span lifecycle and event handling
-  sentry-cli.ts        ← Thin wrapper: runs `npx sentry@latest <command>`
   serialize.ts         ← Attribute redaction/truncation
   __tests__/           ← Vitest tests (run via `vp test`)
-skills/                ← Auto-discovered via package.json "pi.skills"
-  sentry/              ← Setup wizard skill
-  sentry-cli/          ← Teaches agents to use the sentry tool
 scripts/               ← Utility scripts
 ```
 
@@ -47,13 +42,14 @@ All checks must pass before committing (enforced by pre-commit hook). No build s
 
 ### Extension Architecture
 
-- The `sentry` tool is registered **before** the DSN/config check — it works independently of monitoring.
-- Monitoring (tracing, spans) only activates when a DSN is configured in `.pi/sentry.json`.
-- Tool rendering uses `Text` and `Container` from `@mariozechner/pi-tui`. Cast `context.state` as `Partial<SentryRenderState>` since pi initializes it as `{}`.
-- **`index.ts`** is thin wiring — it loads config, inits Sentry, registers the tool, creates a `SessionTracer`, and wires `pi.on()` events to tracer methods.
+- Monitoring (tracing, spans, error capture) only activates when a DSN is configured in `.pi/sentry.json`. Without a DSN the extension stays inactive.
+- **`index.ts`** is thin wiring — it loads config, inits Sentry, creates a `SessionTracer`, and wires `pi.on()` events to tracer methods.
 - **`tracing.ts`** (`SessionTracer` class) owns all span state and lifecycle. It has no dependency on pi's `ExtensionAPI`.
-- **`tool.ts`** (`createSentryTool` factory) returns the tool config object. Only depends on `SentryCLI` and helpers.
 - **`helpers.ts`** contains pure functions with no Sentry SDK imports.
+
+### Span Attributes
+
+Spans must follow the canonical [Sentry `gen_ai.*` conventions](https://getsentry.github.io/sentry-conventions/attributes/gen_ai/) — **never emit attributes marked deprecated there.** When adding/changing attributes, check the convention's JSON (`sentry-conventions/model/attributes/gen_ai/`) for the current key and `deprecation.replacement`. Message content uses the `{role, parts: [{type, content}]}` shape via the `buildOutputMessages` / `userTextMessages` helpers in `helpers.ts`. pi-only metadata is namespaced under `pi.*`.
 
 ### Config Fields
 
@@ -64,24 +60,14 @@ When adding a new config field, update all four places in `config.ts`:
 4. `normalizeConfig()` return value
 5. `addEnvOverrides()` with a `PI_SENTRY_*` env var
 
-### Skills
-
-Skills live in `skills/<name>/SKILL.md` with YAML frontmatter (`name`, `description`). They teach agents how to use features — always reference the `sentry` tool call syntax, never raw CLI via bash.
-
 ### Testing
 
 Tests live in `pi-extension/__tests__/` and run via `vp test` (Vitest bundled in vite-plus). High-value tests cover:
 - `serialize.test.ts` — redaction, truncation, edge cases
 - `config.test.ts` — validation, defaults, env overrides
-- `sentry-cli.test.ts` — command parsing
 - `helpers.test.ts` — token math, subagent detection, type guards
 
 ## Demo & Testing
-
-Reset Sentry CLI auth to replay the auto-login flow:
-```bash
-./scripts/reset-sentry-auth.sh
-```
 
 Test the extension locally without installing:
 ```bash

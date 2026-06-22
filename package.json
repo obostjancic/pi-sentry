@@ -1,7 +1,7 @@
 {
   "name": "pi-sentry",
   "version": "0.1.11",
-  "description": "Sentry observability extension for pi — distributed tracing, error capture, and built-in Sentry CLI tool",
+  "description": "Sentry observability extension for pi — distributed tracing and error capture",
   "keywords": [
     "ai-monitoring",
     "extension",
@@ -13,7 +13,6 @@
   "license": "MIT",
   "files": [
     "pi-extension",
-    "skills",
     "README.md",
     "LICENSE"
   ],
@@ -37,7 +36,6 @@
   "dependencies": {
     "@sentry/core": "^10.51.0",
     "@sentry/node-core": "^10.51.0",
-    "sentry": "^0.23.0",
     "strip-json-comments": "^5.0.1"
   },
   "devDependencies": {
@@ -55,9 +53,6 @@
   "pi": {
     "extensions": [
       "./pi-extension/index.ts"
-    ],
-    "skills": [
-      "./skills"
     ]
   }
 }

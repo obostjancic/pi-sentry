@@ -38,23 +38,24 @@ describe("basic session trace", () => {
     });
   });
 
-  it("captures a gen_ai.request span with token usage", async () => {
+  it("captures a gen_ai.chat span with token usage", async () => {
     await withTestSession({}, async (ctx) => {
       await ctx.session.prompt("Say hello");
       await ctx.server.waitForEnvelopes(1, 15_000);
 
       const spans = ctx.server.getSpans();
 
-      // Find request span
-      const requestSpan = spans.find(
+      // Find the chat (LLM call) span
+      const chatSpan = spans.find(
         (s: any) =>
-          s["sentry.op"] === "gen_ai.request" || s.data?.["gen_ai.operation.name"] === "request",
+          s["sentry.op"] === "gen_ai.chat" || s.data?.["gen_ai.operation.name"] === "chat",
       );
-      expect(requestSpan).toBeDefined();
+      expect(chatSpan).toBeDefined();
 
-      // Check model attribute
-      const spanData = (requestSpan as any)?.data ?? {};
+      // Check model and provider attributes
+      const spanData = (chatSpan as any)?.data ?? {};
       expect(spanData["gen_ai.request.model"]).toBeTruthy();
+      expect(spanData["gen_ai.provider.name"]).toBeTruthy();
     });
   });
 });

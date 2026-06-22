@@ -2,12 +2,19 @@ import * as Sentry from "@sentry/node-core/light";
 import { setConversationId } from "@sentry/core";
 import type { ResolvedPluginConfig } from "./config.ts";
 import { serializeAttribute } from "./serialize.ts";
-import { setSpanStatus, attachTokenUsage, isAssistantMessage } from "./helpers.ts";
+import {
+  setSpanStatus,
+  attachTokenUsage,
+  isAssistantMessage,
+  buildOutputMessages,
+  userTextMessages,
+  assistantTextMessages,
+  mapFinishReason,
+} from "./helpers.ts";
 
 type SentrySpan = ReturnType<typeof Sentry.startInactiveSpan>;
 
 export interface ContextUsageSnapshot {
-  tokens: number | null;
   contextWindow: number;
   percent: number | null;
 }
@@ -26,11 +33,10 @@ export class SessionTracer {
   private sessionId: string | undefined;
   private sessionFilePath: string | undefined;
   private turnIndex = 0;
-  private _previousTraceId: string | undefined;
   private turnHadToolCalls = false;
   private lastContextUsage: ContextUsageSnapshot | undefined;
 
-  /** Total spans ended since last onToolEnd/onMessageEnd (reset by spanSent callback) */
+  /** Number of spans ended since the last resetSpanCount() call. */
   spanCount = 0;
 
   constructor(
@@ -47,7 +53,51 @@ export class SessionTracer {
 
   resetSession(): void {
     this.turnIndex = 0;
-    this._previousTraceId = undefined;
+  }
+
+  /** Sets model/provider attributes once the model is known. */
+  private applyResolvedModel(span: SentrySpan): void {
+    if (this.modelId === "unknown") return;
+    span.setAttribute("gen_ai.request.model", this.modelId);
+    span.setAttribute("gen_ai.response.model", this.modelId);
+    span.setAttribute("gen_ai.provider.name", this.providerId);
+  }
+
+  /** Sets context-window attributes from the latest usage snapshot. */
+  private applyContextUsage(span: SentrySpan): void {
+    const usage = this.lastContextUsage;
+    if (!usage) return;
+    span.setAttribute("gen_ai.context.window_size", usage.contextWindow);
+    if (usage.percent !== null) {
+      span.setAttribute("gen_ai.context.utilization", usage.percent / 100);
+    }
+  }
+
+  /** Records the current user prompt as input messages, when opted in. */
+  private recordInputMessages(span: SentrySpan): void {
+    if (!this.config.recordInputs || !this.lastUserPrompt) return;
+    span.setAttribute(
+      "gen_ai.input.messages",
+      serializeAttribute(userTextMessages(this.lastUserPrompt), this.config.maxAttributeLength),
+    );
+  }
+
+  /** Starts a `gen_ai.chat` span for an LLM request with the common attributes. */
+  private startChatSpan(parentSpan: SentrySpan, model: string): SentrySpan {
+    return Sentry.startInactiveSpan({
+      parentSpan,
+      op: "gen_ai.chat",
+      name: `chat ${model}`,
+      attributes: {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.request.model": model,
+        "gen_ai.response.model": model,
+        "gen_ai.agent.name": this.agentName,
+        "gen_ai.provider.name": this.providerId,
+        "pi.project.name": this.projectName,
+        ...this.config.tags,
+      },
+    });
   }
 
   private ensureSessionSpan(): SentrySpan {
@@ -60,7 +110,7 @@ export class SessionTracer {
         setConversationId(this.sessionId);
       }
 
-      return Sentry.startInactiveSpan({
+      const span = Sentry.startInactiveSpan({
         op: "gen_ai.invoke_agent",
         name: `invoke_agent ${this.agentName}`,
         forceTransaction: true,
@@ -68,23 +118,17 @@ export class SessionTracer {
           "gen_ai.operation.name": "invoke_agent",
           "gen_ai.agent.name": this.agentName,
           "gen_ai.request.model": this.modelId,
-          "pi.model.provider": this.providerId,
+          "gen_ai.provider.name": this.providerId,
           "pi.project.name": this.projectName,
           "pi.capture.session_events": this.config.includeSessionEvents,
           "pi.turn.index": this.turnIndex,
           ...(this.sessionId ? { "pi.session.id": this.sessionId } : {}),
           ...(this.sessionFilePath ? { "pi.session.file": this.sessionFilePath } : {}),
-          ...(this.lastUserPrompt && this.config.recordInputs
-            ? {
-                "gen_ai.request.messages": serializeAttribute(
-                  JSON.stringify([{ role: "user", content: this.lastUserPrompt }]),
-                  this.config.maxAttributeLength,
-                ),
-              }
-            : {}),
           ...this.config.tags,
         },
       });
+      this.recordInputMessages(span);
+      return span;
     });
 
     return this.sessionSpan;
@@ -98,26 +142,21 @@ export class SessionTracer {
     }
 
     for (const [key, span] of this.requestSpans) {
-      if (this.modelId !== "unknown") {
-        span.setAttribute("gen_ai.request.model", this.modelId);
-        span.setAttribute("gen_ai.response.model", this.modelId);
-        span.setAttribute("pi.model.provider", this.providerId);
-      }
+      this.applyResolvedModel(span);
       setSpanStatus(span, false);
       span.end();
       this.requestSpans.delete(key);
     }
 
     if (this.sessionSpan) {
-      if (this.modelId !== "unknown") {
-        this.sessionSpan.setAttribute("gen_ai.request.model", this.modelId);
-        this.sessionSpan.setAttribute("gen_ai.response.model", this.modelId);
-        this.sessionSpan.setAttribute("pi.model.provider", this.providerId);
-      }
+      this.applyResolvedModel(this.sessionSpan);
       if (this.config.recordOutputs && this.lastAssistantResponse) {
         this.sessionSpan.setAttribute(
-          "gen_ai.response.text",
-          serializeAttribute(this.lastAssistantResponse, this.config.maxAttributeLength),
+          "gen_ai.output.messages",
+          serializeAttribute(
+            assistantTextMessages(this.lastAssistantResponse),
+            this.config.maxAttributeLength,
+          ),
         );
       }
       if (this.aggregateInputTokens > 0) {
@@ -130,21 +169,7 @@ export class SessionTracer {
       if (aggregateTotal > 0) {
         this.sessionSpan.setAttribute("gen_ai.usage.total_tokens", aggregateTotal);
       }
-      if (this.lastContextUsage) {
-        this.sessionSpan.setAttribute(
-          "gen_ai.context.window_size",
-          this.lastContextUsage.contextWindow,
-        );
-        if (this.lastContextUsage.tokens !== null) {
-          this.sessionSpan.setAttribute("gen_ai.context.tokens", this.lastContextUsage.tokens);
-        }
-        if (this.lastContextUsage.percent !== null) {
-          this.sessionSpan.setAttribute(
-            "gen_ai.context.utilization",
-            this.lastContextUsage.percent / 100,
-          );
-        }
-      }
+      this.applyContextUsage(this.sessionSpan);
     }
 
     const session = Sentry.getIsolationScope().getSession();
@@ -168,7 +193,7 @@ export class SessionTracer {
 
     if (this.sessionSpan) {
       this.sessionSpan.setAttribute("gen_ai.request.model", this.modelId);
-      this.sessionSpan.setAttribute("pi.model.provider", this.providerId);
+      this.sessionSpan.setAttribute("gen_ai.provider.name", this.providerId);
     }
   }
 
@@ -185,8 +210,7 @@ export class SessionTracer {
         "gen_ai.agent.name": this.agentName,
         "gen_ai.request.model": this.modelId,
         "gen_ai.tool.name": event.toolName,
-        "gen_ai.tool.type": "function",
-        "pi.model.provider": this.providerId,
+        "gen_ai.provider.name": this.providerId,
         "pi.tool_call.id": event.toolCallId,
         "pi.project.name": this.projectName,
         ...this.config.tags,
@@ -195,7 +219,7 @@ export class SessionTracer {
 
     if (this.config.recordInputs) {
       span.setAttribute(
-        "gen_ai.tool.input",
+        "gen_ai.tool.call.arguments",
         serializeAttribute(event.args, this.config.maxAttributeLength),
       );
     }
@@ -214,7 +238,7 @@ export class SessionTracer {
 
     if (this.config.recordOutputs) {
       span.setAttribute(
-        "gen_ai.tool.output",
+        "gen_ai.tool.call.result",
         serializeAttribute(event.result, this.config.maxAttributeLength),
       );
     }
@@ -223,18 +247,6 @@ export class SessionTracer {
     span.end();
     this.toolSpans.delete(event.toolCallId);
     this.spanCount++;
-
-    if (this.config.enableMetrics) {
-      Sentry.metrics.count("gen_ai.client.tool.execution", 1, {
-        attributes: {
-          "gen_ai.agent.name": this.agentName,
-          "gen_ai.tool.name": event.toolName,
-          "pi.project.name": this.projectName,
-          status: event.isError ? "error" : "ok",
-          ...this.config.tags,
-        },
-      });
-    }
   }
 
   onInput(event: { text?: string }): void {
@@ -242,7 +254,6 @@ export class SessionTracer {
       this.lastUserPrompt = event.text;
     }
     if (this.sessionSpan) {
-      this._previousTraceId = this.sessionSpan.spanContext().traceId;
       this.cleanupSession();
     }
     this.lastAssistantResponse = undefined;
@@ -264,29 +275,8 @@ export class SessionTracer {
     const spanModel =
       typeof msg.model === "string" && msg.model.length > 0 ? msg.model : this.modelId;
 
-    const requestSpan = Sentry.startInactiveSpan({
-      parentSpan,
-      op: "gen_ai.request",
-      name: `request ${spanModel}`,
-      attributes: {
-        "gen_ai.operation.name": "request",
-        "gen_ai.request.model": spanModel,
-        "gen_ai.response.model": spanModel,
-        "gen_ai.agent.name": this.agentName,
-        "pi.model.provider": this.providerId,
-        "pi.project.name": this.projectName,
-        ...this.config.tags,
-      },
-    });
-
-    if (this.config.recordInputs && this.lastUserPrompt) {
-      const inputMessages = JSON.stringify([{ role: "user", content: this.lastUserPrompt }]);
-      requestSpan.setAttribute(
-        "gen_ai.request.messages",
-        serializeAttribute(inputMessages, this.config.maxAttributeLength),
-      );
-    }
-
+    const requestSpan = this.startChatSpan(parentSpan, spanModel);
+    this.recordInputMessages(requestSpan);
     this.requestSpans.set(timestamp, requestSpan);
   }
 
@@ -307,121 +297,48 @@ export class SessionTracer {
       this.requestSpans.delete(msg.timestamp);
       usageSpan.setAttribute("gen_ai.request.model", msg.model);
       usageSpan.setAttribute("gen_ai.response.model", msg.model);
-      usageSpan.setAttribute("pi.model.provider", msg.provider);
-      usageSpan.updateName(`request ${msg.model}`);
+      usageSpan.setAttribute("gen_ai.provider.name", msg.provider);
+      usageSpan.updateName(`chat ${msg.model}`);
     } else {
-      const parentSpan = this.ensureSessionSpan();
-      usageSpan = Sentry.startInactiveSpan({
-        parentSpan,
-        op: "gen_ai.request",
-        name: `request ${msg.model}`,
-        attributes: {
-          "gen_ai.operation.name": "request",
-          "gen_ai.request.model": msg.model,
-          "gen_ai.response.model": msg.model,
-          "gen_ai.agent.name": this.agentName,
-          "pi.model.provider": msg.provider,
-          "pi.project.name": this.projectName,
-          ...this.config.tags,
-        },
-      });
+      usageSpan = this.startChatSpan(this.ensureSessionSpan(), msg.model);
+    }
+
+    if (msg.responseId) {
+      usageSpan.setAttribute("gen_ai.response.id", msg.responseId);
+    }
+    if (msg.stopReason) {
+      usageSpan.setAttribute("gen_ai.response.finish_reasons", mapFinishReason(msg.stopReason));
     }
 
     const { totalInput, totalOutput } = attachTokenUsage(usageSpan, msg.usage);
     this.aggregateInputTokens += totalInput;
     this.aggregateOutputTokens += totalOutput;
 
-    if (this.lastContextUsage) {
-      usageSpan.setAttribute("gen_ai.context.window_size", this.lastContextUsage.contextWindow);
-      if (this.lastContextUsage.tokens !== null) {
-        usageSpan.setAttribute("gen_ai.context.tokens", this.lastContextUsage.tokens);
-      }
-      if (this.lastContextUsage.percent !== null) {
-        usageSpan.setAttribute("gen_ai.context.utilization", this.lastContextUsage.percent / 100);
-      }
-    }
+    this.applyContextUsage(usageSpan);
+    this.recordInputMessages(usageSpan);
 
-    if (this.config.recordInputs && this.lastUserPrompt) {
-      const inputMessages = JSON.stringify([{ role: "user", content: this.lastUserPrompt }]);
-      usageSpan.setAttribute(
-        "gen_ai.request.messages",
-        serializeAttribute(inputMessages, this.config.maxAttributeLength),
+    if (this.config.recordOutputs && msg.content) {
+      const outputMessages = buildOutputMessages(
+        msg.content as unknown as ReadonlyArray<Record<string, unknown>>,
+        msg.stopReason,
       );
-    }
-
-    if (msg.content) {
-      const toolCalls = msg.content
-        .filter(
-          (
-            c: any,
-          ): c is {
-            type: "toolCall";
-            id: string;
-            name: string;
-            arguments: Record<string, any>;
-          } => (c as any).type === "toolCall",
-        )
-        .map((c: any) => ({
-          name: c.name,
-          type: "function",
-          arguments: JSON.stringify(c.arguments),
-        }));
-      if (toolCalls.length > 0) {
+      if (outputMessages.length > 0) {
         usageSpan.setAttribute(
-          "gen_ai.response.tool_calls",
-          serializeAttribute(JSON.stringify(toolCalls), this.config.maxAttributeLength),
+          "gen_ai.output.messages",
+          serializeAttribute(outputMessages, this.config.maxAttributeLength),
         );
-      }
-
-      if (this.config.recordOutputs) {
-        const textContent = msg.content
-          .filter(
-            (c: any): c is { type: "text"; text: string } =>
-              (c as any).type === "text" && typeof (c as any).text === "string",
-          )
-          .map((c: any) => c.text)
+        const text = outputMessages[0].parts
+          .filter((p): p is { type: "text"; content: string } => p.type === "text")
+          .map((p) => p.content)
           .join("\n");
-        if (textContent.length > 0) {
-          this.lastAssistantResponse = textContent;
-          usageSpan.setAttribute(
-            "gen_ai.response.text",
-            serializeAttribute(textContent, this.config.maxAttributeLength),
-          );
+        if (text.length > 0) {
+          this.lastAssistantResponse = text;
         }
       }
     }
     setSpanStatus(usageSpan, false);
     usageSpan.end();
     this.spanCount++;
-
-    if (this.config.enableMetrics) {
-      const metricAttrs = {
-        "gen_ai.agent.name": this.agentName,
-        "pi.project.name": this.projectName,
-        "gen_ai.request.model": msg.model,
-        "pi.model.provider": msg.provider,
-        ...this.config.tags,
-      };
-
-      if (msg.usage.input > 0) {
-        Sentry.metrics.distribution("gen_ai.client.token.usage", msg.usage.input, {
-          attributes: { ...metricAttrs, "gen_ai.token.type": "input" },
-          unit: "token",
-        });
-      }
-      if (msg.usage.output > 0) {
-        Sentry.metrics.distribution("gen_ai.client.token.usage", msg.usage.output, {
-          attributes: { ...metricAttrs, "gen_ai.token.type": "output" },
-          unit: "token",
-        });
-      }
-      if (msg.usage.cacheRead > 0) {
-        Sentry.metrics.distribution("gen_ai.client.token.usage", msg.usage.cacheRead, {
-          attributes: { ...metricAttrs, "gen_ai.token.type": "cached_input" },
-          unit: "token",
-        });
-      }
-    }
   }
 
   setContextUsage(usage: ContextUsageSnapshot | undefined): void {
@@ -439,10 +356,6 @@ export class SessionTracer {
     if (this.turnHadToolCalls) {
       this.turnHadToolCalls = false;
       return false;
-    }
-
-    if (this.sessionSpan) {
-      this._previousTraceId = this.sessionSpan.spanContext().traceId;
     }
 
     this.cleanupSession();

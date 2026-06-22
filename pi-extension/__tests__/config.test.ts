@@ -13,8 +13,6 @@ describe("normalizeConfig", () => {
     expect(result.maxAttributeLength).toBe(12000);
     expect(result.includeMessageUsageSpans).toBe(true);
     expect(result.includeSessionEvents).toBe(true);
-    expect(result.enableMetrics).toBe(false);
-    expect(result.enableCLIInsights).toBe(false);
     expect(result.tags).toEqual({});
   });
 

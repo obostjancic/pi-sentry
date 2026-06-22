@@ -94,20 +94,6 @@ export function setSpanStatus(span: SentrySpan, isError: boolean): void {
   span.setStatus({ code: isError ? 2 : 1 });
 }
 
-export function isAuthError(output: string): boolean {
-  const lower = output.toLowerCase();
-  return [
-    "not logged in",
-    "not authenticated",
-    "401",
-    "auth token",
-    "unauthorized",
-    "login required",
-    "run 'sentry auth login'",
-    "run `sentry auth login`",
-  ].some((indicator) => lower.includes(indicator));
-}
-
 export function attachTokenUsage(
   span: SentrySpan,
   usage: {
@@ -130,16 +116,84 @@ export function attachTokenUsage(
     span.setAttribute("gen_ai.usage.output_tokens", totalOutput);
   }
   if (typeof usage.cacheRead === "number") {
-    span.setAttribute("gen_ai.usage.input_tokens.cached", usage.cacheRead);
+    span.setAttribute("gen_ai.usage.cache_read.input_tokens", usage.cacheRead);
   }
   if (typeof usage.cacheWrite === "number") {
-    span.setAttribute("gen_ai.usage.input_tokens.cache_write", usage.cacheWrite);
+    span.setAttribute("gen_ai.usage.cache_creation.input_tokens", usage.cacheWrite);
   }
   const totalTokens = totalInput + totalOutput;
   if (totalTokens > 0) {
     span.setAttribute("gen_ai.usage.total_tokens", totalTokens);
   }
   return { totalInput, totalOutput };
+}
+
+/**
+ * Canonical gen_ai message shape per the Sentry Conventions.
+ * See https://getsentry.github.io/sentry-conventions/attributes/gen_ai/
+ * Each message has a `role` and a list of `parts`; arrays/objects must be
+ * JSON-stringified before being set as span attributes.
+ */
+export type GenAiPart =
+  | { type: "text"; content: string }
+  | { type: "reasoning"; content: string }
+  | { type: "tool_call"; id: string; name: string; arguments: unknown }
+  | { type: "tool_call_response"; id: string; result: unknown };
+
+export interface GenAiMessage {
+  role: "user" | "assistant" | "tool" | "system";
+  parts: GenAiPart[];
+  finish_reason?: string;
+}
+
+/** Maps pi's StopReason to a gen_ai.response.finish_reasons value. */
+export function mapFinishReason(stopReason: string): string {
+  return stopReason === "toolUse" ? "tool_calls" : stopReason;
+}
+
+/** Builds a canonical input messages array from a single user prompt. */
+export function userTextMessages(text: string): GenAiMessage[] {
+  return [{ role: "user", parts: [{ type: "text", content: text }] }];
+}
+
+/** Builds a canonical output messages array from a single assistant text reply. */
+export function assistantTextMessages(text: string): GenAiMessage[] {
+  return [{ role: "assistant", parts: [{ type: "text", content: text }] }];
+}
+
+/**
+ * Builds canonical `gen_ai.output.messages` from a pi assistant message's
+ * content blocks. Text becomes `text` parts, thinking becomes `reasoning`
+ * parts (surfaced separately by Sentry), and tool calls become `tool_call`
+ * parts. Returns an empty array when there is nothing to record.
+ */
+export function buildOutputMessages(
+  content: ReadonlyArray<Record<string, unknown>>,
+  stopReason?: string,
+): GenAiMessage[] {
+  const parts: GenAiPart[] = [];
+  for (const c of content) {
+    if (c.type === "text" && typeof c.text === "string" && c.text.length > 0) {
+      parts.push({ type: "text", content: c.text });
+    } else if (c.type === "thinking" && typeof c.thinking === "string" && c.thinking.length > 0) {
+      parts.push({ type: "reasoning", content: c.thinking });
+    } else if (c.type === "toolCall") {
+      parts.push({
+        type: "tool_call",
+        id: typeof c.id === "string" ? c.id : "",
+        name: typeof c.name === "string" ? c.name : "",
+        arguments: c.arguments,
+      });
+    }
+  }
+  if (parts.length === 0) {
+    return [];
+  }
+  const message: GenAiMessage = { role: "assistant", parts };
+  if (stopReason) {
+    message.finish_reason = mapFinishReason(stopReason);
+  }
+  return [message];
 }
 
 export function isAssistantMessage(msg: unknown): msg is AssistantMessage {
@@ -153,8 +207,4 @@ export function isAssistantMessage(msg: unknown): msg is AssistantMessage {
     m.usage !== null &&
     typeof m.usage === "object"
   );
-}
-
-export function formatSentryDuration(ms: number): string {
-  return `${(ms / 1000).toFixed(1)}s`;
 }

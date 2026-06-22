@@ -13,8 +13,6 @@ const DEFAULTS = {
   maxAttributeLength: 12000,
   includeMessageUsageSpans: true,
   includeSessionEvents: true,
-  enableMetrics: false,
-  enableCLIInsights: false,
   tags: {} as Record<string, string>,
 } as const;
 
@@ -38,8 +36,6 @@ export interface PluginConfig {
   maxAttributeLength?: number;
   includeMessageUsageSpans?: boolean;
   includeSessionEvents?: boolean;
-  enableMetrics?: boolean;
-  enableCLIInsights?: boolean;
   tags?: Record<string, string>;
 }
 
@@ -56,8 +52,6 @@ export interface ResolvedPluginConfig {
   maxAttributeLength: number;
   includeMessageUsageSpans: boolean;
   includeSessionEvents: boolean;
-  enableMetrics: boolean;
-  enableCLIInsights: boolean;
   tags: Record<string, string>;
 }
 
@@ -204,9 +198,6 @@ export function normalizeConfig(raw: Record<string, unknown>): ResolvedPluginCon
     includeSessionEvents:
       asOptionalBoolean(raw.includeSessionEvents, "includeSessionEvents") ??
       DEFAULTS.includeSessionEvents,
-    enableMetrics: asOptionalBoolean(raw.enableMetrics, "enableMetrics") ?? DEFAULTS.enableMetrics,
-    enableCLIInsights:
-      asOptionalBoolean(raw.enableCLIInsights, "enableCLIInsights") ?? DEFAULTS.enableCLIInsights,
     tags: asOptionalTags(raw.tags, "tags") ?? DEFAULTS.tags,
   };
 }
@@ -295,16 +286,6 @@ export function addEnvOverrides(raw: Record<string, unknown>): Record<string, un
   const maxAttributeLength = parseNumberEnv("PI_SENTRY_MAX_ATTRIBUTE_LENGTH");
   if (maxAttributeLength !== undefined) {
     withEnv.maxAttributeLength = maxAttributeLength;
-  }
-
-  const enableMetrics = parseBooleanEnv("PI_SENTRY_ENABLE_METRICS");
-  if (enableMetrics !== undefined) {
-    withEnv.enableMetrics = enableMetrics;
-  }
-
-  const enableCLIInsights = parseBooleanEnv("PI_SENTRY_ENABLE_CLI_INSIGHTS");
-  if (enableCLIInsights !== undefined) {
-    withEnv.enableCLIInsights = enableCLIInsights;
   }
 
   const tagsEnv = process.env.PI_SENTRY_TAGS;

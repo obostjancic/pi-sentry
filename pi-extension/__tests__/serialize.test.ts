@@ -45,6 +45,16 @@ describe("serializeAttribute", () => {
     expect(result.outer.safe).toBe("visible");
   });
 
+  it("truncates redacted JSON after serialization", () => {
+    const input = {
+      token: "secret-token",
+      payload: "a".repeat(200),
+    };
+    const result = serializeAttribute(input, 80);
+    expect(result).toContain("[REDACTED]");
+    expect(result).toContain("...[truncated ");
+  });
+
   it("redacts sensitive fields inside JSON strings", () => {
     const input = JSON.stringify({
       name: "test",

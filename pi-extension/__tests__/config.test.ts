@@ -104,6 +104,13 @@ describe("addEnvOverrides", () => {
     expect(result.dsn).toBe("https://fallback@sentry.io/789");
   });
 
+  it("prefers PI_SENTRY_DSN over SENTRY_DSN when both are set", () => {
+    process.env.PI_SENTRY_DSN = "https://primary@sentry.io/111";
+    process.env.SENTRY_DSN = "https://fallback@sentry.io/789";
+    const result = addEnvOverrides({});
+    expect(result.dsn).toBe("https://primary@sentry.io/111");
+  });
+
   it("overrides boolean from env", () => {
     process.env.PI_SENTRY_RECORD_INPUTS = "false";
     const result = addEnvOverrides({ recordInputs: true });

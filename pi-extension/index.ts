@@ -1,5 +1,5 @@
-import type { ExtensionAPI, ExtensionUIContext } from "@mariozechner/pi-coding-agent";
-import { Box, Text } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { Box, Text } from "@earendil-works/pi-tui";
 import * as Sentry from "@sentry/node-core/light";
 import { initWithoutDefaultIntegrations, type LightNodeClient } from "@sentry/node-core/light";
 import { conversationIdIntegration, getClient } from "@sentry/core";
@@ -33,13 +33,19 @@ function initSentry(
   logger: ReturnType<typeof createLogger>,
 ): LightNodeClient | undefined {
   if (sentryInitialized) {
-    if (initializedDsn && initializedDsn !== config.dsn) {
-      logger.warn("Sentry already initialized with different DSN", {
-        initializedDsn,
-        requestedDsn: config.dsn,
-      });
+    if (initializedDsn === config.dsn) {
+      return sharedClient ?? getClient<LightNodeClient>();
     }
-    return sharedClient ?? getClient<LightNodeClient>();
+
+    logger.warn("Sentry already initialized with different DSN, rotating client", {
+      initializedDsn,
+      requestedDsn: config.dsn,
+    });
+    void sharedClient?.close(5000);
+    sharedClient = undefined;
+    sharedClientRefCount = 0;
+    sentryInitialized = false;
+    initializedDsn = null;
   }
 
   const client = initWithoutDefaultIntegrations({
@@ -289,12 +295,6 @@ export default async function piSentryMonitor(pi: ExtensionAPI) {
     } catch (error) {
       captureHandlerError("Failed to create session span", error);
     }
-  });
-
-  pi.on("session_switch", (_event, ctx) => {
-    uiContext = ctx.ui;
-    tracer.setSession(ctx.sessionManager.getSessionId(), ctx.sessionManager.getSessionFile());
-    tracer.resetSession();
   });
 
   pi.on("session_shutdown", async () => {

@@ -39,12 +39,17 @@ pi-specific metadata (session id, project name, turn index, tool call id) is nam
 
 **Global** (all projects):
 ```bash
-pi install npm:pi-sentry
+pi install git:git@github.com:obostjancic/pi-sentry.git
 ```
 
 **Project-local** (shared with teammates):
 ```bash
-pi install npm:pi-sentry -l
+pi install git:git@github.com:obostjancic/pi-sentry.git -l
+```
+
+Or use the npm package once published:
+```bash
+pi install npm:pi-sentry
 ```
 
 Run `/reload` in pi to activate without restarting.
@@ -131,19 +136,21 @@ To capture content when you need it, enable `recordInputs` and `recordOutputs` i
 ## Development
 
 ```bash
-git clone https://github.com/HazAT/pi-sentry && cd pi-sentry
+git clone https://github.com/obostjancic/pi-sentry && cd pi-sentry
 npm install
 
 # Run without installing
-pi -e ./pi-extension/index.ts
+PI_CODING_AGENT_DIR="$(mktemp -d)" PI_SENTRY_DSN="https://exampleKey@o0.ingest.sentry.io/0" pi -e .
 
 # Checks (all must pass before commit)
-vp check       # format + lint + typecheck
-vp test        # run tests
+npm run check   # format + lint + typecheck
+npm test        # run tests
 
-# Optional maintainer-only patch helper
+# Optional maintainer-only: apply extension_error patch to local SDK for testing
 npm run patch:apply
 ```
+
+Note: this package targets `@earendil-works/pi-coding-agent@^0.79.x`. The `extension_error` event for sibling-extension error capture is not upstream; `npm run patch:apply` adds a local patch to test that optional path.
 
 ## License
 

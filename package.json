@@ -39,12 +39,18 @@
     "strip-json-comments": "^5.0.1"
   },
   "devDependencies": {
-    "@mariozechner/pi-ai": "latest",
-    "@mariozechner/pi-coding-agent": "^0.64.0",
+    "@earendil-works/pi-ai": "^0.79.5",
+    "@earendil-works/pi-coding-agent": "^0.79.5",
+    "@earendil-works/pi-tui": "^0.79.5",
     "@types/node": "^22.13.10",
     "@voidzero-dev/vite-plus-core": "^0.1.15",
     "typescript": "^5.8.2",
     "vite-plus": "^0.1.15"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@latest",

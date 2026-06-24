@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const patchDir = resolve(root, "patches");
-const targetDir = resolve(root, "node_modules/@mariozechner/pi-coding-agent");
+const targetDir = resolve(root, "node_modules/@earendil-works/pi-coding-agent");
 
 const patches = ["extension-error-event.patch"];
 

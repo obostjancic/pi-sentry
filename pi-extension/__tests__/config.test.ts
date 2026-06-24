@@ -8,8 +8,8 @@ describe("normalizeConfig", () => {
     const result = normalizeConfig({ dsn: VALID_DSN });
     expect(result.dsn).toBe(VALID_DSN);
     expect(result.tracesSampleRate).toBe(1);
-    expect(result.recordInputs).toBe(false);
-    expect(result.recordOutputs).toBe(false);
+    expect(result.recordInputs).toBe(true);
+    expect(result.recordOutputs).toBe(true);
     expect(result.maxAttributeLength).toBe(12000);
     expect(result.includeMessageUsageSpans).toBe(true);
     expect(result.includeSessionEvents).toBe(true);

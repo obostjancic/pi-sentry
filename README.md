@@ -2,7 +2,7 @@
 
 [Sentry](https://sentry.io) observability for [pi](https://github.com/badlogic/pi-mono) coding agent sessions — distributed tracing and error capture.
 
-Monitoring is safe by default: traces are on, but tool inputs and outputs are not captured unless you opt in.
+Full capture is on by default: traces, tool inputs, and tool outputs are all recorded. Set `recordInputs` / `recordOutputs` to `false` in config or env if you want structure-only tracing.
 
 ## What It Does
 
@@ -64,17 +64,15 @@ Create `.pi/sentry.json` (or `.jsonc`):
 }
 ```
 
-That's it. Traces flow immediately. Without a DSN the extension stays inactive. If you want request text or tool payloads in Sentry, opt in explicitly:
+That's it. Traces flow immediately with full input/output capture. Without a DSN the extension stays inactive. To capture structure and timing only (no conversation or tool content), disable capture explicitly:
 
 ```json
 {
   "dsn": "https://your-key@o123.ingest.sentry.io/456",
-  "recordInputs": true,
-  "recordOutputs": true
+  "recordInputs": false,
+  "recordOutputs": false
 }
 ```
-
-By default, `recordInputs` and `recordOutputs` are `false`, so the extension captures structure and timing without storing conversation or tool content.
 
 ### Config File Locations (first match wins)
 
@@ -88,8 +86,8 @@ By default, `recordInputs` and `recordOutputs` are `false`, so the extension cap
 |---|---|
 | `PI_SENTRY_DSN` / `SENTRY_DSN` | Sentry DSN |
 | `PI_SENTRY_TRACES_SAMPLE_RATE` | Sample rate (0–1) |
-| `PI_SENTRY_RECORD_INPUTS` | Capture tool inputs (true/false, default `false`) |
-| `PI_SENTRY_RECORD_OUTPUTS` | Capture tool outputs (true/false, default `false`) |
+| `PI_SENTRY_RECORD_INPUTS` | Capture tool inputs (true/false, default `true`) |
+| `PI_SENTRY_RECORD_OUTPUTS` | Capture tool outputs (true/false, default `true`) |
 | `PI_SENTRY_TAGS` | Custom tags (`key:value,key:value`) |
 | `SENTRY_ENVIRONMENT` | Environment name |
 | `SENTRY_RELEASE` | Release version |
@@ -105,8 +103,8 @@ By default, `recordInputs` and `recordOutputs` are `false`, so the extension cap
   "debug": false,
   "agentName": "my-agent",
   "projectName": "my-project",
-  "recordInputs": false,
-  "recordOutputs": false,
+  "recordInputs": true,
+  "recordOutputs": true,
   "maxAttributeLength": 12000,
   "includeMessageUsageSpans": true,
   "includeSessionEvents": true,
@@ -116,7 +114,7 @@ By default, `recordInputs` and `recordOutputs` are `false`, so the extension cap
 }
 ```
 
-To capture content when you need it, enable `recordInputs` and `recordOutputs` in config or via the matching environment variables.
+To disable content capture, set `recordInputs` and `recordOutputs` to `false` in config or via the matching environment variables.
 
 ## Event Mapping
 

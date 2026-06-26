@@ -11,6 +11,11 @@ let sentryInitialized = false;
 let initializedDsn: string | null = null;
 let sharedClient: LightNodeClient | undefined;
 let sharedClientRefCount = 0;
+// True when `sharedClient` was initialized by the host process (e.g. an app
+// that called Sentry.init before loading this extension) rather than by us. We
+// borrow such a client so the process has a single Sentry client / project, and
+// we must never close it on release.
+let borrowedClient = false;
 const beforeExitCleanups = new Set<() => void>();
 
 function onBeforeExit(): void {
@@ -46,6 +51,21 @@ function initSentry(
     sharedClientRefCount = 0;
     sentryInitialized = false;
     initializedDsn = null;
+  }
+
+  // Reuse a client initialized elsewhere in this process (e.g. a host app that
+  // already called Sentry.init). One process → one client → one project. We
+  // borrow it and must not own/close it.
+  const existing = getClient<LightNodeClient>();
+  if (existing?.getDsn()) {
+    logger.info("Reusing existing Sentry client from host process", {
+      dsn: existing.getOptions().dsn,
+    });
+    sentryInitialized = true;
+    initializedDsn = existing.getOptions().dsn ?? config.dsn;
+    sharedClient = existing;
+    borrowedClient = true;
+    return existing;
   }
 
   const client = initWithoutDefaultIntegrations({
@@ -97,11 +117,14 @@ async function releaseClient(client: LightNodeClient | undefined): Promise<void>
   }
 
   try {
-    await client.close(5000);
+    // Never close a client we borrowed from the host process; it owns its
+    // lifecycle.
+    if (!borrowedClient) await client.close(5000);
   } finally {
     sharedClient = undefined;
     sentryInitialized = false;
     initializedDsn = null;
+    borrowedClient = false;
   }
 }
 
